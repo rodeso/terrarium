@@ -1,0 +1,88 @@
+[package]
+name = "ollama-web-app"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# UI (shared by server and browser)
+leptos = "0.8.23"
+leptos_meta = "0.8"
+leptos_router = "0.8.17"
+serde = { version = "1.0.229", features = ["derive"] }
+pulldown-cmark = { version = "0.13.6", default-features = false, features = ["html"] }
+futures = "0.3"
+
+serde_json = "1.0.154"
+
+# Browser APIs (compile on the server too, but only run in the browser)
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Blob",
+    "Clipboard",
+    "DataTransfer",
+    "DragEvent",
+    "Element",
+    "Event",
+    "EventTarget",
+    "File",
+    "FileList",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlTextAreaElement",
+    "KeyboardEvent",
+    "MouseEvent",
+    "Navigator",
+    "Window",
+] }
+console_error_panic_hook = { version = "0.1", optional = true }
+
+# Server-only
+actix-files = { version = "0.6", optional = true }
+actix-web = { version = "4.19.0", optional = true, features = ["macros"] }
+leptos_actix = { version = "0.8", optional = true }
+reqwest = { version = "0.13.5", optional = true, features = ["json", "stream"] }
+tokio = { version = "1.54.1", optional = true, features = ["full"] }
+unicode-segmentation = "1"
+
+[features]
+hydrate = [
+    "leptos/hydrate",
+    "dep:console_error_panic_hook",
+]
+ssr = [
+    "leptos/ssr",
+    "leptos_meta/ssr",
+    "leptos_router/ssr",
+    "dep:actix-files",
+    "dep:actix-web",
+    "dep:leptos_actix",
+    "dep:reqwest",
+    "dep:tokio",
+]
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[package.metadata.leptos]
+output-name = "ollama-web-app"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+style-file = "style/main.css"
+assets-dir = "public"
+site-addr = "127.0.0.1:8080"
+reload-port = 3001
+browserquery = "defaults"
+bin-features = ["ssr"]
+bin-default-features = false
+lib-features = ["hydrate"]
+lib-default-features = false
+lib-profile-release = "wasm-release"
