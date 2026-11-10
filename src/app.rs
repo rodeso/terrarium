@@ -3,6 +3,7 @@
 
 use crate::calculator::CalculatorPage;
 use crate::chat::{Chat, ChatPage};
+use crate::news::NewsPage;
 use crate::notes::NotesPage;
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
@@ -12,9 +13,10 @@ use leptos_router::path;
 
 /// Modules shown in the sidebar: (label, path, icon class).
 /// To add one: add an entry here and a matching `<Route>` below.
-const MODULES: [(&str, &str, &str); 3] = [
+const MODULES: [(&str, &str, &str); 4] = [
     ("Chat", "/", "icon-chat"),
     ("Notes", "/notes", "icon-notes"),
+    ("Newsstand", "/news", "icon-news"),
     ("Calculator", "/calculator", "icon-calc"),
 ];
 
@@ -69,6 +71,8 @@ pub fn Workspace() -> impl IntoView {
                         <Route path=path!("/") view=ChatPage />
                         <Route path=path!("/notes") view=NotesPage />
                         <Route path=path!("/notes/:id") view=NotesPage />
+                        <Route path=path!("/news") view=NewsPage />
+                        <Route path=path!("/news/:id") view=NewsPage />
                         <Route path=path!("/calculator") view=CalculatorPage />
                     </Routes>
                 </div>

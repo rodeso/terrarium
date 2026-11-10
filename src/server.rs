@@ -119,6 +119,10 @@ struct StoredEntry {
 
 pub struct AppState {
     pub db: crate::db::Db,
+    /// For fetching news feeds (its own user agent and timeout).
+    pub http: reqwest::Client,
+    /// Held while news feeds refresh, so refreshes don't overlap.
+    pub news_refresh: Mutex<()>,
     client: reqwest::Client,
     chat_url: String,
     model: String,
@@ -174,6 +178,8 @@ impl AppState {
         let db = crate::db::Db::open_from_env().unwrap_or_else(|e| panic!("{e}"));
         Self {
             db,
+            http: crate::feeds::client(),
+            news_refresh: Mutex::new(()),
             client,
             chat_url: format!("{base}/api/chat"),
             model,
