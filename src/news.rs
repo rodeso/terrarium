@@ -98,7 +98,7 @@ pub async fn news_list(feed: Option<i64>, #[server(default)] unread_only: bool) 
 /// Returns the article and marks it read.
 #[server]
 pub async fn open_article(id: i64) -> Result<Option<Article>, ServerFnError> {
-    crate::server::state().await?.db.open_article(id).await.map_err(ServerFnError::new)
+    crate::server::state().await?.db.open_article(id, true).await.map_err(ServerFnError::new)
 }
 
 #[server]

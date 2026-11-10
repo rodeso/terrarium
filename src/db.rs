@@ -4,6 +4,7 @@
 //! The file lives at `data/workspace.db` (override with WORKSPACE_DB) and is
 //! created, with its tables, on first run.
 
+use crate::calendar::{Event, EventInput};
 use crate::news::{Article, ArticleSummary, FeedInfo};
 use crate::notes::{Note, NoteSummary, snippet};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -47,7 +48,21 @@ const MIGRATIONS: &[&str] = &["CREATE TABLE notes (
         UNIQUE (feed_id, guid)
     );
     CREATE INDEX articles_by_date ON articles (published_ms DESC);
-    CREATE INDEX articles_by_feed ON articles (feed_id, published_ms DESC);"];
+    CREATE INDEX articles_by_feed ON articles (feed_id, published_ms DESC);",
+    // Dates and times are plain local values ("2026-11-14", "15:30"), like a
+    // paper diary; a NULL start_time means an all-day event.
+    "CREATE TABLE events (
+        id          INTEGER PRIMARY KEY,
+        title       TEXT    NOT NULL,
+        date        TEXT    NOT NULL,
+        start_time  TEXT,
+        end_time    TEXT,
+        location    TEXT    NOT NULL DEFAULT '',
+        notes       TEXT    NOT NULL DEFAULT '',
+        created_ms  INTEGER NOT NULL,
+        updated_ms  INTEGER NOT NULL
+    );
+    CREATE INDEX events_by_date ON events (date, start_time);"];
 
 /// Oldest articles beyond this many per feed are dropped after a refresh.
 const MAX_ARTICLES_PER_FEED: i64 = 300;
@@ -252,10 +267,13 @@ impl Db {
         .await
     }
 
-    /// Fetches an article and marks it read.
-    pub async fn open_article(&self, id: i64) -> Result<Option<Article>, String> {
+    /// Fetches an article, marking it read if `mark_read` (the reader does;
+    /// the model reading it for an answer doesn't).
+    pub async fn open_article(&self, id: i64, mark_read: bool) -> Result<Option<Article>, String> {
         self.run(move |c| {
-            c.execute("UPDATE articles SET read = 1 WHERE id = ?1", params![id])?;
+            if mark_read {
+                c.execute("UPDATE articles SET read = 1 WHERE id = ?1", params![id])?;
+            }
             c.query_row(
                 "SELECT a.id, a.feed_id, f.title, a.title, a.url, a.author, a.content_html, a.snippet, a.published_ms, a.read
                  FROM articles a JOIN feeds f ON f.id = a.feed_id WHERE a.id = ?1",
@@ -350,6 +368,76 @@ impl Db {
         })
         .await
     }
+}
+
+impl Db {
+    // ---------------- Calendar ----------------
+
+    /// Events from `from` to `to` inclusive ("YYYY-MM-DD"), by date, all-day
+    /// events first, then by start time.
+    pub async fn events_between(&self, from: String, to: String) -> Result<Vec<Event>, String> {
+        self.run(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT id, title, date, start_time, end_time, location, notes FROM events
+                 WHERE date BETWEEN ?1 AND ?2 ORDER BY date, start_time IS NOT NULL, start_time, id",
+            )?;
+            let rows = stmt.query_map(params![from, to], event_from_row)?;
+            rows.collect()
+        })
+        .await
+    }
+
+    /// Inserts (no id) or updates an already validated event. Returns None
+    /// if the event to update no longer exists.
+    pub async fn save_event(&self, e: EventInput) -> Result<Option<Event>, String> {
+        self.run(move |c| {
+            let now = now_ms();
+            let id = match e.id {
+                Some(id) => {
+                    let changed = c.execute(
+                        "UPDATE events SET title = ?2, date = ?3, start_time = ?4, end_time = ?5,
+                            location = ?6, notes = ?7, updated_ms = ?8 WHERE id = ?1",
+                        params![id, e.title, e.date, e.start_time, e.end_time, e.location, e.notes, now],
+                    )?;
+                    if changed == 0 {
+                        return Ok(None);
+                    }
+                    id
+                }
+                None => {
+                    c.execute(
+                        "INSERT INTO events (title, date, start_time, end_time, location, notes, created_ms, updated_ms)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+                        params![e.title, e.date, e.start_time, e.end_time, e.location, e.notes, now],
+                    )?;
+                    c.last_insert_rowid()
+                }
+            };
+            c.query_row(
+                "SELECT id, title, date, start_time, end_time, location, notes FROM events WHERE id = ?1",
+                params![id],
+                event_from_row,
+            )
+            .optional()
+        })
+        .await
+    }
+
+    pub async fn delete_event(&self, id: i64) -> Result<(), String> {
+        self.run(move |c| c.execute("DELETE FROM events WHERE id = ?1", params![id]).map(|_| ())).await
+    }
+}
+
+fn event_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Event> {
+    Ok(Event {
+        id: r.get(0)?,
+        title: r.get(1)?,
+        date: r.get(2)?,
+        start_time: r.get(3)?,
+        end_time: r.get(4)?,
+        location: r.get(5)?,
+        notes: r.get(6)?,
+    })
 }
 
 fn migrate(conn: &Connection) -> Result<(), String> {

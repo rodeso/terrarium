@@ -4,6 +4,7 @@
 use crate::calc;
 use crate::calculator::{CalcSource, Calculation};
 use crate::chat::{Attachment, ChatEntry, ChatInfo, DEFAULT_FILE_PROMPT, Role, StreamEvent, ToolKind, ToolUse};
+use crate::dates::Date;
 use crate::notes::{self, Note};
 use actix_web::web;
 use futures::{StreamExt, channel::mpsc};
@@ -38,7 +39,25 @@ You can also use the user's notes. When the user mentions their notes, or asks a
 something they may have written down (plans, lists, ideas, meetings), call `search_notes`, \
 then `read_note` on the relevant results, and answer from what the notes say, naming the \
 note you used. If nothing relevant is found, say so instead of guessing. Only call \
-`create_note` when the user explicitly asks you to save or write something down as a note.";
+`create_note` when the user explicitly asks you to save or write something down as a note.
+
+You can also read the news feeds the user follows in their Newsstand. When the user asks \
+about the news, headlines, what's happening, or a topic or source in the news, call \
+`news_headlines` (with keywords and/or a source if they mention one), and `read_article` \
+when you need more than the headline. Answer only from those articles, say which source \
+each item comes from, and never invent news. If there is nothing relevant, say so.
+
+You can also use the user's calendar. When they ask about their schedule, plans, \
+appointments or what's on a day, call `calendar_events` with the date range, working out \
+dates like \"tomorrow\" or \"next Friday\" from the current date below. Only call \
+`add_event` when the user asks you to add, schedule or put something in their calendar, \
+and always pass dates as YYYY-MM-DD and times as HH:MM (24-hour).";
+
+/// Longest range `calendar_events` returns in one call.
+const MAX_CALENDAR_DAYS: i64 = 92;
+
+/// Most articles returned by one `news_headlines` call.
+const HEADLINES: usize = 12;
 
 /// Longest note text handed to the model in one `read_note` call (about
 /// 1.5k tokens), so a huge note can't crowd out the conversation.
@@ -384,6 +403,73 @@ fn tool_definitions() -> Value {
     }, {
         "type": "function",
         "function": {
+            "name": "news_headlines",
+            "description": "Lists recent articles from the news feeds the user follows, newest \
+                first, with id, source, age, headline and a short summary. Optionally filter \
+                by keywords (e.g. \"AI\" or \"elections Portugal\") and/or by source name \
+                (e.g. \"Hacker News\", \"BBC\"). With no keywords it returns the latest \
+                headlines.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Optional keywords" },
+                    "source": { "type": "string", "description": "Optional source name" }
+                },
+                "required": []
+            }
+        }
+    }, {
+        "type": "function",
+        "function": {
+            "name": "read_article",
+            "description": "Returns the text of one news article, by the id that \
+                news_headlines returned, with its link.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "description": "The article's id" }
+                },
+                "required": ["id"]
+            }
+        }
+    }, {
+        "type": "function",
+        "function": {
+            "name": "calendar_events",
+            "description": "Lists the events in the user's calendar between two dates \
+                (inclusive), with date, time, title, location and notes. Without dates it \
+                returns the next 7 days.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "from": { "type": "string", "description": "First day, YYYY-MM-DD" },
+                    "to": { "type": "string", "description": "Last day, YYYY-MM-DD" }
+                },
+                "required": []
+            }
+        }
+    }, {
+        "type": "function",
+        "function": {
+            "name": "add_event",
+            "description": "Adds an event to the user's calendar. Only use this when the user \
+                asks to add or schedule something. Leave start_time out for an all-day event.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string" },
+                    "date": { "type": "string", "description": "YYYY-MM-DD" },
+                    "start_time": { "type": "string", "description": "HH:MM, 24-hour" },
+                    "end_time": { "type": "string", "description": "HH:MM, 24-hour" },
+                    "location": { "type": "string" },
+                    "notes": { "type": "string" }
+                },
+                "required": ["title", "date"]
+            }
+        }
+    }, {
+        "type": "function",
+        "function": {
             "name": "create_note",
             "description": "Saves a new note for the user. Only use this when the user asks \
                 you to save, note down or write something as a note. Markdown is allowed in \
@@ -454,7 +540,9 @@ async fn run_chat(state: web::Data<AppState>, user: StoredEntry, think: bool, tx
     let send = |event: StreamEvent| tx.unbounded_send(encode(&event)).is_ok();
 
     // Snapshot the history so the lock isn't held while the model works.
-    let mut messages = vec![ModelMessage::new("system", state.system_prompt.clone())];
+    // The model has no clock; tell it the date so "today" and "this week" mean something.
+    let today = chrono::Local::now().format("%A, %-d %B %Y, %H:%M");
+    let mut messages = vec![ModelMessage::new("system", format!("{}\n\nCurrent date and time: {today}.", state.system_prompt))];
     messages.extend(state.history.lock().await.iter().flat_map(|s| s.model.iter().cloned()));
     messages.extend(user.model.iter().cloned());
 
@@ -655,8 +743,15 @@ async fn run_tool(state: &AppState, call: &Value, context: Option<String>) -> (S
         "search_notes" => tool_search_notes(state, &args).await,
         "read_note" => tool_read_note(state, &args).await,
         "create_note" => tool_create_note(state, &args).await,
+        "news_headlines" => tool_news_headlines(state, &args).await,
+        "read_article" => tool_read_article(state, &args).await,
+        "calendar_events" => tool_calendar_events(state, &args).await,
+        "add_event" => tool_add_event(state, &args).await,
         _ => (
-            format!("Error: there is no tool called '{name}'. The tools are calculate, search_notes, read_note and create_note."),
+            format!(
+                "Error: there is no tool called '{name}'. The tools are calculate, search_notes, \
+                 read_note, create_note, news_headlines, read_article, calendar_events and add_event."
+            ),
             Some(ToolUse { tool: ToolKind::Unknown, input: name.clone(), output: "Not an available tool".into(), ok: false, link: None }),
         ),
     };
@@ -772,6 +867,243 @@ async fn tool_create_note(state: &AppState, args: &Value) -> (String, Option<Too
         }
         Err(e) => (format!("Error: {e}"), tool_use(ToolKind::CreateNote, title, "failed", false, None)),
     }
+}
+
+async fn tool_news_headlines(state: &AppState, args: &Value) -> (String, Option<ToolUse>) {
+    let query = args["query"].as_str().unwrap_or_default().trim().to_string();
+    let source = args["source"].as_str().unwrap_or_default().trim().to_string();
+    let shown_input = match (query.is_empty(), source.is_empty()) {
+        (true, true) => "latest".to_string(),
+        (false, true) => query.clone(),
+        (true, false) => source.clone(),
+        (false, false) => format!("{query} · {source}"),
+    };
+    let fail = |e: String| (format!("Error: {e}"), tool_use(ToolKind::NewsHeadlines, shown_input.clone(), "failed", false, None));
+
+    // Make "today's news" mean today: refresh feeds that are getting old.
+    let feeds = match state.db.feeds().await {
+        Ok(f) => f,
+        Err(e) => return fail(e),
+    };
+    if feeds.is_empty() {
+        return (
+            "The user doesn't follow any news feeds yet. Tell them they can add some in the Newsstand tab.".into(),
+            tool_use(ToolKind::NewsHeadlines, shown_input, "no feeds", true, None),
+        );
+    }
+    let now = now_ms();
+    if feeds.iter().any(|f| f.fetched_ms.is_none_or(|t| now - t > crate::news::STALE_AFTER_MS)) {
+        if let Ok(_guard) = state.news_refresh.try_lock() {
+            let _ = crate::feeds::refresh_all(&state.db, &state.http).await;
+        } else {
+            let _ = state.news_refresh.lock().await; // another refresh is running; wait for it
+        }
+    }
+
+    // Which feed(s): match the source name loosely against titles and addresses.
+    let feeds = state.db.feeds().await.unwrap_or(feeds);
+    let wanted: Option<Vec<i64>> = if source.is_empty() {
+        None
+    } else {
+        let needle = source.to_lowercase();
+        let ids: Vec<i64> = feeds
+            .iter()
+            .filter(|f| {
+                let hay = format!("{} {}", f.title, f.url).to_lowercase();
+                hay.contains(&needle) || needle.split_whitespace().all(|w| hay.contains(w))
+            })
+            .map(|f| f.id)
+            .collect();
+        if ids.is_empty() {
+            let names: Vec<&str> = feeds.iter().map(|f| f.title.as_str()).collect();
+            return (
+                format!("No followed source matches \"{source}\". The user's sources are: {}.", names.join(", ")),
+                tool_use(ToolKind::NewsHeadlines, shown_input, "unknown source", false, None),
+            );
+        }
+        Some(ids)
+    };
+
+    let articles = match state.db.articles(None, false, 1000).await {
+        Ok(a) => a,
+        Err(e) => return fail(e),
+    };
+    let in_scope = articles.into_iter().filter(|a| wanted.as_ref().is_none_or(|ids| ids.contains(&a.feed_id)));
+    let terms = notes::search_terms(&query);
+    let mut hits: Vec<_> = if terms.is_empty() {
+        in_scope.collect() // newest first already
+    } else {
+        let mut scored: Vec<_> = in_scope
+            .map(|a| (notes::relevance(&terms, &a.title, &a.snippet), a))
+            .filter(|(score, _)| *score > 0)
+            .collect();
+        // Best matches first; among equals, newest first.
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.published_ms.cmp(&a.1.published_ms)));
+        scored.into_iter().map(|(_, a)| a).collect()
+    };
+    hits.truncate(HEADLINES);
+
+    let summary = match hits.len() {
+        0 => "nothing found".to_string(),
+        1 => "1 article".to_string(),
+        n => format!("{n} articles"),
+    };
+    if hits.is_empty() {
+        return (
+            format!("No articles in the user's feeds match \"{shown_input}\"."),
+            tool_use(ToolKind::NewsHeadlines, shown_input, summary, true, None),
+        );
+    }
+    let mut out = String::from("Articles from the user's feeds:\n");
+    for a in &hits {
+        out.push_str(&format!(
+            "- id {} | {} | {}: {}{}\n",
+            a.id,
+            a.feed_title,
+            age(a.published_ms),
+            a.title,
+            if a.snippet.is_empty() || a.snippet == a.title { String::new() } else { format!(" — {}", a.snippet) },
+        ));
+    }
+    out.push_str("Use read_article with an id for more detail.");
+    (out, tool_use(ToolKind::NewsHeadlines, shown_input, summary, true, None))
+}
+
+async fn tool_read_article(state: &AppState, args: &Value) -> (String, Option<ToolUse>) {
+    let id = args["id"].as_i64().or_else(|| args["id"].as_str().and_then(|s| s.trim().parse().ok()));
+    let Some(id) = id else {
+        return ("Error: missing the article `id` (a number from news_headlines).".into(), None);
+    };
+    match state.db.open_article(id, false).await {
+        Ok(Some(a)) => {
+            let text = crate::feeds::html_to_text(&a.content_html);
+            let text = if text.trim().is_empty() { a.snippet.clone() } else { text };
+            let mut body: String = text.chars().take(READ_NOTE_MAX_CHARS).collect();
+            if text.chars().count() > READ_NOTE_MAX_CHARS {
+                body.push_str(" [… cut off because it is long]");
+            }
+            // Feeds often carry only a teaser; say so instead of letting the model pad it out.
+            let partial = text.chars().count() < 600;
+            let mut out = format!(
+                "\"{}\" — {}{}, {}\n",
+                a.title,
+                a.feed_title,
+                a.author.as_deref().map(|x| format!(" (by {x})")).unwrap_or_default(),
+                age(a.published_ms),
+            );
+            if let Some(url) = &a.url {
+                out.push_str(&format!("Link: {url}\n"));
+            }
+            out.push('\n');
+            out.push_str(&body);
+            if partial {
+                out.push_str("\n\n(The feed only includes this summary; the full article is at the link.)");
+            }
+            (out, tool_use(ToolKind::ReadArticle, a.title, "", true, Some(format!("/news/{id}"))))
+        }
+        Ok(None) => (
+            format!("Error: there is no article with id {id}. Use news_headlines to find one."),
+            tool_use(ToolKind::ReadArticle, format!("#{id}"), "not found", false, None),
+        ),
+        Err(e) => (format!("Error: {e}"), tool_use(ToolKind::ReadArticle, format!("#{id}"), "failed", false, None)),
+    }
+}
+
+async fn tool_calendar_events(state: &AppState, args: &Value) -> (String, Option<ToolUse>) {
+    let today = crate::calendar::today();
+    let arg_date = |key: &str| args[key].as_str().map(str::trim).filter(|s| !s.is_empty()).map(|s| (s.to_string(), Date::parse(s)));
+    let from = match arg_date("from") {
+        None => today,
+        Some((_, Some(d))) => d,
+        Some((raw, None)) => return (format!("Error: “{raw}” isn't a date. Use YYYY-MM-DD; today is {today}."), None),
+    };
+    let to = match arg_date("to") {
+        None => from.add_days(6),
+        Some((_, Some(d))) => d,
+        Some((raw, None)) => return (format!("Error: “{raw}” isn't a date. Use YYYY-MM-DD; today is {today}."), None),
+    };
+    let (from, to) = if to < from { (to, from) } else { (from, to) };
+    let to = if to.to_days() - from.to_days() >= MAX_CALENDAR_DAYS { from.add_days(MAX_CALENDAR_DAYS - 1) } else { to };
+    let range = if from == to { from.long() } else { format!("{} to {}", from.long(), to.long()) };
+    let link = Some(format!("/calendar/{from}"));
+
+    let events = match state.db.events_between(from.to_string(), to.to_string()).await {
+        Ok(e) => e,
+        Err(e) => return (format!("Error: {e}"), tool_use(ToolKind::CalendarEvents, range, "failed", false, None)),
+    };
+    let shown = if from == to { from.to_string() } else { format!("{from} → {to}") };
+    if events.is_empty() {
+        return (
+            format!("The calendar has no events from {range}."),
+            tool_use(ToolKind::CalendarEvents, shown, "nothing planned", true, link),
+        );
+    }
+    let mut out = format!("Events from {range}:\n");
+    for e in &events {
+        let day = Date::parse(&e.date).map(Date::long).unwrap_or_else(|| e.date.clone());
+        out.push_str(&format!("- {day}, {}: {}", e.when(), e.title));
+        if !e.location.is_empty() {
+            out.push_str(&format!(" @ {}", e.location));
+        }
+        if !e.notes.is_empty() {
+            out.push_str(&format!(" ({})", e.notes.replace('\n', " ")));
+        }
+        out.push('\n');
+    }
+    let count = if events.len() == 1 { "1 event".to_string() } else { format!("{} events", events.len()) };
+    (out, tool_use(ToolKind::CalendarEvents, shown, count, true, link))
+}
+
+async fn tool_add_event(state: &AppState, args: &Value) -> (String, Option<ToolUse>) {
+    let text = |key: &str| args[key].as_str().unwrap_or_default().to_string();
+    let opt = |key: &str| args[key].as_str().map(str::to_string).filter(|s| !s.trim().is_empty());
+    let input = crate::calendar::EventInput {
+        id: None,
+        title: text("title"),
+        date: text("date"),
+        start_time: opt("start_time"),
+        end_time: opt("end_time"),
+        location: text("location"),
+        notes: text("notes"),
+    };
+    let today = crate::calendar::today();
+    let checked = match crate::calendar::validate(input) {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                format!("Error: {e}. Today is {} ({today}); fix the event and call add_event again.", today.long()),
+                tool_use(ToolKind::AddEvent, text("title"), e, false, None),
+            );
+        }
+    };
+    let date = checked.date.clone();
+    match state.db.save_event(checked).await {
+        Ok(Some(e)) => {
+            let day = Date::parse(&e.date).map(Date::long).unwrap_or(e.date.clone());
+            (
+                format!("Added to the calendar: {} on {day}, {}.", e.title, e.when()),
+                tool_use(ToolKind::AddEvent, format!("{} · {} {}", e.title, e.date, e.when()), "", true, Some(format!("/calendar/{date}"))),
+            )
+        }
+        Ok(None) => ("Error: the event couldn't be saved.".into(), tool_use(ToolKind::AddEvent, text("title"), "failed", false, None)),
+        Err(e) => (format!("Error: {e}"), tool_use(ToolKind::AddEvent, text("title"), "failed", false, None)),
+    }
+}
+
+/// "12 min ago", "3 h ago", "yesterday", "4 days ago".
+fn age(ms: i64) -> String {
+    let minutes = (now_ms() - ms).max(0) / 60_000;
+    match minutes {
+        0..=1 => "just now".into(),
+        2..=59 => format!("{minutes} min ago"),
+        60..=1439 => format!("{} h ago", minutes / 60),
+        1440..=2879 => "yesterday".into(),
+        _ => format!("{} days ago", minutes / 1440),
+    }
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
 /// "today", "yesterday", "5 days ago": enough for the model to judge recency.

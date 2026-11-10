@@ -53,6 +53,10 @@ pub enum ToolKind {
     SearchNotes,
     ReadNote,
     CreateNote,
+    NewsHeadlines,
+    ReadArticle,
+    CalendarEvents,
+    AddEvent,
     /// A tool name the model made up.
     Unknown,
 }
@@ -557,6 +561,10 @@ fn ToolChip(tool: ToolUse) -> impl IntoView {
         ToolKind::SearchNotes => ("Searched notes", "tool-icon-notes", "→", "/notes", "The model searched your notes."),
         ToolKind::ReadNote => ("Read note", "tool-icon-notes", "", "/notes", "The model read this note. Click to open it."),
         ToolKind::CreateNote => ("Created note", "tool-icon-notes", "", "/notes", "The model saved this as a new note. Click to open it."),
+        ToolKind::NewsHeadlines => ("News", "tool-icon-news", "→", "/news", "The model looked at your news feeds."),
+        ToolKind::ReadArticle => ("Read article", "tool-icon-news", "", "/news", "The model read this article. Click to open it."),
+        ToolKind::CalendarEvents => ("Calendar", "tool-icon-calendar", "→", "/calendar", "The model looked at your calendar."),
+        ToolKind::AddEvent => ("Added event", "tool-icon-calendar", "", "/calendar", "The model added this to your calendar. Click to open that day."),
         ToolKind::Unknown => ("Unknown tool", "tool-icon", "→", "/", "The model tried to use a tool that doesn't exist."),
     };
     let href = tool.link.clone().unwrap_or_else(|| default_link.to_string());

@@ -1,7 +1,9 @@
 pub mod app;
 pub mod calc;
+pub mod calendar;
 pub mod calculator;
 pub mod chat;
+pub mod dates;
 pub mod emoji;
 pub mod markdown;
 pub mod news;
