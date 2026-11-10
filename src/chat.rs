@@ -35,10 +35,26 @@ pub enum Role {
 /// A calculator call the model made while answering.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolUse {
-    pub expression: String,
+    pub tool: ToolKind,
+    /// What the tool was given: an expression, a search, a note title.
+    pub input: String,
     /// The result, or the error message if `ok` is false.
     pub output: String,
     pub ok: bool,
+    /// Where the chip links to (e.g. the note that was read or created).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolKind {
+    Calculate,
+    SearchNotes,
+    ReadNote,
+    CreateNote,
+    /// A tool name the model made up.
+    Unknown,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -74,7 +90,7 @@ pub struct Attachment {
 pub enum StreamEvent {
     Token { text: String },
     Thinking { text: String },
-    Tool { expression: String, output: String, ok: bool },
+    Tool { tool: ToolUse },
     Error { message: String },
     Done,
 }
@@ -310,8 +326,8 @@ async fn stream_reply(
                 Ok(StreamEvent::Thinking { text }) => {
                     reply.thinking.update(|t| t.push_str(&text));
                 }
-                Ok(StreamEvent::Tool { expression, output, ok }) => {
-                    reply.tools.update(|t| t.push(ToolUse { expression, output, ok }));
+                Ok(StreamEvent::Tool { tool }) => {
+                    reply.tools.update(|t| t.push(tool));
                     on_progress();
                 }
                 Ok(StreamEvent::Error { message }) => return Err(message),
@@ -521,21 +537,41 @@ fn ThinkingPanel(thinking: RwSignal<String>, streaming: RwSignal<bool>, answered
     }
 }
 
-/// "Used the calculator" chip shown above a reply; links to the Calculator tab.
+/// A chip above a reply showing a tool the model used, linking to where
+/// its result lives (the Calculator history, or a note).
 #[component]
 fn ToolChip(tool: ToolUse) -> impl IntoView {
-    let title = if tool.ok {
-        "Calculated exactly with the calculator tool. Open the Calculator tab to see the history."
-    } else {
-        "The model sent the calculator an expression it couldn't evaluate."
+    let ok = tool.ok;
+    let (label, icon, connector, default_link, title) = match tool.tool {
+        ToolKind::Calculate => (
+            "Calculator",
+            "tool-icon",
+            if ok { "=" } else { "→" },
+            "/calculator",
+            if ok {
+                "Calculated exactly with the calculator tool. Open the Calculator tab to see the history."
+            } else {
+                "The model sent the calculator an expression it couldn't evaluate."
+            },
+        ),
+        ToolKind::SearchNotes => ("Searched notes", "tool-icon-notes", "→", "/notes", "The model searched your notes."),
+        ToolKind::ReadNote => ("Read note", "tool-icon-notes", "", "/notes", "The model read this note. Click to open it."),
+        ToolKind::CreateNote => ("Created note", "tool-icon-notes", "", "/notes", "The model saved this as a new note. Click to open it."),
+        ToolKind::Unknown => ("Unknown tool", "tool-icon", "→", "/", "The model tried to use a tool that doesn't exist."),
     };
+    let href = tool.link.clone().unwrap_or_else(|| default_link.to_string());
+    let is_calc = tool.tool == ToolKind::Calculate;
     view! {
-        <a class="tool-use" class:failed=!tool.ok href="/calculator" title=title>
-            <span class="tool-icon" aria-hidden="true"></span>
-            <span class="tool-label">"Calculator"</span>
-            <code class="tool-expr">{tool.expression}</code>
-            <span class="tool-eq">{if tool.ok { "=" } else { "→" }}</span>
-            <strong class="tool-out">{tool.output}</strong>
+        <a class="tool-use" class:failed=!ok href=href title=title>
+            <span class=icon aria-hidden="true"></span>
+            <span class="tool-label">{label}</span>
+            {(!tool.input.is_empty()).then(|| if is_calc {
+                view! { <code class="tool-expr">{tool.input.clone()}</code> }.into_any()
+            } else {
+                view! { <span class="tool-input">"“" {tool.input.clone()} "”"</span> }.into_any()
+            })}
+            {(!connector.is_empty()).then(|| view! { <span class="tool-eq">{connector}</span> })}
+            {(!tool.output.is_empty()).then(|| view! { <strong class="tool-out">{tool.output.clone()}</strong> })}
         </a>
     }
 }

@@ -3,7 +3,8 @@
 
 use crate::calc;
 use crate::calculator::{CalcSource, Calculation};
-use crate::chat::{Attachment, ChatEntry, ChatInfo, DEFAULT_FILE_PROMPT, Role, StreamEvent, ToolUse};
+use crate::chat::{Attachment, ChatEntry, ChatInfo, DEFAULT_FILE_PROMPT, Role, StreamEvent, ToolKind, ToolUse};
+use crate::notes::{self, Note};
 use actix_web::web;
 use futures::{StreamExt, channel::mpsc};
 use leptos::prelude::ServerFnError;
@@ -31,7 +32,19 @@ const TOOL_INSTRUCTIONS: &str = "You have a `calculate` tool. Call it only when 
 user's question requires working out a number, and then call it for each value you need \
 instead of doing arithmetic yourself, including in follow-up questions. For anything \
 else, such as explanations, facts, advice or writing, answer directly and do not call \
-any tool. Round money to 2 decimal places in your answer.";
+any tool. Round money to 2 decimal places in your answer.
+
+You can also use the user's notes. When the user mentions their notes, or asks about \
+something they may have written down (plans, lists, ideas, meetings), call `search_notes`, \
+then `read_note` on the relevant results, and answer from what the notes say, naming the \
+note you used. If nothing relevant is found, say so instead of guessing. Only call \
+`create_note` when the user explicitly asks you to save or write something down as a note.";
+
+/// Longest note text handed to the model in one `read_note` call (about
+/// 1.5k tokens), so a huge note can't crowd out the conversation.
+const READ_NOTE_MAX_CHARS: usize = 6000;
+/// Most notes returned by one `search_notes` call.
+const SEARCH_RESULTS: usize = 8;
 
 /// Used when OLLAMA_MODEL isn't set. On the app's benchmark (wage, tip,
 /// follow-up, prime sums, non-math, language) it scored 12/14 with thinking
@@ -105,6 +118,7 @@ struct StoredEntry {
 }
 
 pub struct AppState {
+    pub db: crate::db::Db,
     client: reqwest::Client,
     chat_url: String,
     model: String,
@@ -157,7 +171,9 @@ impl AppState {
         let client = reqwest::Client::new();
         let can_think = model_capabilities(&client, &base, &model).await.iter().any(|c| c == "thinking");
         println!("Model: {model} (thinking {})", if can_think { "supported" } else { "not supported" });
+        let db = crate::db::Db::open_from_env().unwrap_or_else(|e| panic!("{e}"));
         Self {
+            db,
             client,
             chat_url: format!("{base}/api/chat"),
             model,
@@ -329,6 +345,52 @@ fn tool_definitions() -> Value {
                 "required": ["expression"]
             }
         }
+    }, {
+        "type": "function",
+        "function": {
+            "name": "search_notes",
+            "description": "Searches the user's saved notes by words in the title or text and \
+                returns the best matches with their id, title, when they were last edited and \
+                a preview. Use a few keywords, e.g. \"groceries\" or \"project ideas\". \
+                An empty query lists the most recently edited notes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Keywords to look for" }
+                },
+                "required": ["query"]
+            }
+        }
+    }, {
+        "type": "function",
+        "function": {
+            "name": "read_note",
+            "description": "Returns the full text of one of the user's notes, by the id that \
+                search_notes returned.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "description": "The note's id" }
+                },
+                "required": ["id"]
+            }
+        }
+    }, {
+        "type": "function",
+        "function": {
+            "name": "create_note",
+            "description": "Saves a new note for the user. Only use this when the user asks \
+                you to save, note down or write something as a note. Markdown is allowed in \
+                the body.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "A short title" },
+                    "body": { "type": "string", "description": "The note's text" }
+                },
+                "required": ["title", "body"]
+            }
+        }
     }])
 }
 
@@ -462,7 +524,7 @@ async fn run_chat(state: web::Data<AppState>, user: StoredEntry, think: bool, tx
         for call in &calls {
             let (name, result_for_model, tool_use) = run_tool(&state, call, context.clone()).await;
             if let Some(t) = &tool_use {
-                if !send(StreamEvent::Tool { expression: t.expression.clone(), output: t.output.clone(), ok: t.ok }) {
+                if !send(StreamEvent::Tool { tool: t.clone() }) {
                     return;
                 }
             }
@@ -577,31 +639,142 @@ async fn stream_round(
 async fn run_tool(state: &AppState, call: &Value, context: Option<String>) -> (String, String, Option<ToolUse>) {
     let function = &call["function"];
     let name = function["name"].as_str().unwrap_or_default().to_string();
-    if name != "calculate" {
-        let shown = ToolUse { expression: format!("{name}(…)"), output: "Not an available tool".into(), ok: false };
-        return (name.clone(), format!("Error: there is no tool called '{name}'. The only tool is `calculate`."), Some(shown));
-    }
-
     // Arguments normally arrive as an object, but some models send a JSON string.
-    let arguments = match &function["arguments"] {
+    let args = match &function["arguments"] {
         Value::String(s) => serde_json::from_str(s).unwrap_or(Value::Null),
         other => other.clone(),
     };
-    let Some(expression) = arguments["expression"].as_str().map(str::trim).filter(|e| !e.is_empty()) else {
-        let message = "Error: missing the `expression` argument, e.g. {\"expression\": \"13 * 50 / 60\"}.";
-        return (name, message.into(), None);
+    let (for_model, shown) = match name.as_str() {
+        "calculate" => tool_calculate(state, &args, context).await,
+        "search_notes" => tool_search_notes(state, &args).await,
+        "read_note" => tool_read_note(state, &args).await,
+        "create_note" => tool_create_note(state, &args).await,
+        _ => (
+            format!("Error: there is no tool called '{name}'. The tools are calculate, search_notes, read_note and create_note."),
+            Some(ToolUse { tool: ToolKind::Unknown, input: name.clone(), output: "Not an available tool".into(), ok: false, link: None }),
+        ),
     };
+    (name, for_model, shown)
+}
 
+fn tool_use(tool: ToolKind, input: impl Into<String>, output: impl Into<String>, ok: bool, link: Option<String>) -> Option<ToolUse> {
+    Some(ToolUse { tool, input: input.into(), output: output.into(), ok, link })
+}
+
+async fn tool_calculate(state: &AppState, args: &Value, context: Option<String>) -> (String, Option<ToolUse>) {
+    let Some(expression) = args["expression"].as_str().map(str::trim).filter(|e| !e.is_empty()) else {
+        return ("Error: missing the `expression` argument, e.g. {\"expression\": \"13 * 50 / 60\"}.".into(), None);
+    };
     match calc::evaluate_to_string(expression) {
         Ok(result) => {
             state.record_calculation(expression.to_string(), result.clone(), CalcSource::Assistant, context).await;
-            let tool_use = ToolUse { expression: expression.to_string(), output: result.clone(), ok: true };
-            (name, result, Some(tool_use))
+            (result.clone(), tool_use(ToolKind::Calculate, expression, result, true, None))
         }
-        Err(e) => {
-            let tool_use = ToolUse { expression: expression.to_string(), output: e.to_string(), ok: false };
-            (name, format!("Error: {e}. Fix the expression and call the tool again."), Some(tool_use))
+        Err(e) => (
+            format!("Error: {e}. Fix the expression and call the tool again."),
+            tool_use(ToolKind::Calculate, expression, e.to_string(), false, None),
+        ),
+    }
+}
+
+async fn tool_search_notes(state: &AppState, args: &Value) -> (String, Option<ToolUse>) {
+    let query = args["query"].as_str().unwrap_or_default().trim().to_string();
+    let notes = match state.db.all_notes().await {
+        Ok(n) => n,
+        Err(e) => return (format!("Error: {e}"), tool_use(ToolKind::SearchNotes, query, "failed", false, None)),
+    };
+    let terms = notes::search_terms(&query);
+    let mut hits: Vec<(u32, Note)> = if terms.is_empty() {
+        notes.into_iter().map(|n| (0, n)).collect() // already newest first
+    } else {
+        let mut scored: Vec<(u32, Note)> = notes
+            .into_iter()
+            .map(|n| (notes::relevance(&terms, &n.title, &n.body), n))
+            .filter(|(score, _)| *score > 0)
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.updated_ms.cmp(&a.1.updated_ms)));
+        scored
+    };
+    hits.truncate(SEARCH_RESULTS);
+
+    let summary = match hits.len() {
+        0 => "no matches".to_string(),
+        1 => "1 found".to_string(),
+        n => format!("{n} found"),
+    };
+    let for_model = if hits.is_empty() {
+        if terms.is_empty() { "The user has no notes yet.".into() } else { format!("No notes match \"{query}\".") }
+    } else {
+        let mut out = format!("{} (most relevant first):\n", if terms.is_empty() { "Most recent notes" } else { "Matching notes" });
+        for (_, n) in &hits {
+            out.push_str(&format!(
+                "- id {}: \"{}\" (edited {}): {}\n",
+                n.id,
+                if n.title.trim().is_empty() { "Untitled" } else { n.title.trim() },
+                ago(n.updated_ms),
+                notes::snippet(&n.body),
+            ));
         }
+        out.push_str("Use read_note with an id to see a note's full text.");
+        out
+    };
+    let shown_query = if query.is_empty() { "recent".to_string() } else { query };
+    (for_model, tool_use(ToolKind::SearchNotes, shown_query, summary, true, None))
+}
+
+async fn tool_read_note(state: &AppState, args: &Value) -> (String, Option<ToolUse>) {
+    // Models send ids as numbers or as strings.
+    let id = args["id"].as_i64().or_else(|| args["id"].as_str().and_then(|s| s.trim().parse().ok()));
+    let Some(id) = id else {
+        return ("Error: missing the note `id` (a number from search_notes).".into(), None);
+    };
+    match state.db.get_note(id).await {
+        Ok(Some(n)) => {
+            let title = if n.title.trim().is_empty() { "Untitled".to_string() } else { n.title.trim().to_string() };
+            let mut body: String = n.body.chars().take(READ_NOTE_MAX_CHARS).collect();
+            if n.body.chars().count() > READ_NOTE_MAX_CHARS {
+                body.push_str("\n[… the rest of this note was cut off because it is long]");
+            }
+            let for_model = format!("Note id {id}: \"{title}\" (edited {})\n\n{body}", ago(n.updated_ms));
+            (for_model, tool_use(ToolKind::ReadNote, title, "", true, Some(format!("/notes/{id}"))))
+        }
+        Ok(None) => (
+            format!("Error: there is no note with id {id}. Use search_notes to find the right id."),
+            tool_use(ToolKind::ReadNote, format!("#{id}"), "not found", false, None),
+        ),
+        Err(e) => (format!("Error: {e}"), tool_use(ToolKind::ReadNote, format!("#{id}"), "failed", false, None)),
+    }
+}
+
+async fn tool_create_note(state: &AppState, args: &Value) -> (String, Option<ToolUse>) {
+    let title = args["title"].as_str().unwrap_or_default().trim().to_string();
+    let body = args["body"].as_str().unwrap_or_default().to_string();
+    if title.is_empty() && body.trim().is_empty() {
+        return ("Error: give the note a `title` and a `body`.".into(), None);
+    }
+    let created = match state.db.create_note().await {
+        Ok(n) => n,
+        Err(e) => return (format!("Error: {e}"), tool_use(ToolKind::CreateNote, title, "failed", false, None)),
+    };
+    match state.db.save_note(created.id, title.clone(), body).await {
+        Ok(_) => {
+            let shown = if title.is_empty() { "Untitled".to_string() } else { title };
+            (
+                format!("Saved as a new note (id {}) titled \"{shown}\".", created.id),
+                tool_use(ToolKind::CreateNote, shown, "", true, Some(format!("/notes/{}", created.id))),
+            )
+        }
+        Err(e) => (format!("Error: {e}"), tool_use(ToolKind::CreateNote, title, "failed", false, None)),
+    }
+}
+
+/// "today", "yesterday", "5 days ago": enough for the model to judge recency.
+fn ago(ms: i64) -> String {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+    match (now - ms).max(0) / 86_400_000 {
+        0 => "today".into(),
+        1 => "yesterday".into(),
+        d => format!("{d} days ago"),
     }
 }
 

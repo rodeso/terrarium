@@ -4,7 +4,10 @@ pub mod calculator;
 pub mod chat;
 pub mod emoji;
 pub mod markdown;
+pub mod notes;
 
+#[cfg(feature = "ssr")]
+pub mod db;
 #[cfg(feature = "ssr")]
 pub mod server;
 

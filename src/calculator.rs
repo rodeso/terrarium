@@ -453,7 +453,8 @@ fn utf16_len(s: &str) -> u32 {
 }
 
 /// "14:05" for today, "3 Nov, 14:05" otherwise, in the viewer's locale.
-fn format_time(at_ms: u64) -> String {
+/// Browser only (call after hydration).
+pub(crate) fn format_time(at_ms: u64) -> String {
     let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms as f64));
     let now = js_sys::Date::new_0();
     let locale = window().navigator().language().unwrap_or_else(|| "en-US".into());

@@ -3,6 +3,7 @@
 
 use crate::calculator::CalculatorPage;
 use crate::chat::{Chat, ChatPage};
+use crate::notes::NotesPage;
 use leptos::prelude::*;
 use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
 use leptos_router::components::{Route, Router, Routes};
@@ -11,8 +12,9 @@ use leptos_router::path;
 
 /// Modules shown in the sidebar: (label, path, icon class).
 /// To add one: add an entry here and a matching `<Route>` below.
-const MODULES: [(&str, &str, &str); 2] = [
+const MODULES: [(&str, &str, &str); 3] = [
     ("Chat", "/", "icon-chat"),
+    ("Notes", "/notes", "icon-notes"),
     ("Calculator", "/calculator", "icon-calc"),
 ];
 
@@ -65,6 +67,8 @@ pub fn Workspace() -> impl IntoView {
                         </section>
                     }>
                         <Route path=path!("/") view=ChatPage />
+                        <Route path=path!("/notes") view=NotesPage />
+                        <Route path=path!("/notes/:id") view=NotesPage />
                         <Route path=path!("/calculator") view=CalculatorPage />
                     </Routes>
                 </div>
@@ -82,7 +86,12 @@ fn Sidebar() -> impl IntoView {
             {MODULES
                 .iter()
                 .map(|&(label, href, icon)| {
-                    let active = move || location.pathname.with(|p| p == href);
+                    // "/notes" is also active on "/notes/12"; "/" only on "/".
+                    let active = move || {
+                        location.pathname.with(|p| {
+                            p == href || (href != "/" && p.starts_with(href) && p[href.len()..].starts_with('/'))
+                        })
+                    };
                     view! {
                         <a
                             class="nav-item"
