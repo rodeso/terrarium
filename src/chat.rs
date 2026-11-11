@@ -16,9 +16,9 @@ pub const MAX_UPLOAD_BYTES: usize = 2 * 1024 * 1024;
 pub const DEFAULT_FILE_PROMPT: &str = "Summarize this file.";
 
 const SUGGESTIONS: [(&str, &str); 3] = [
-    ("How much do I earn in 50 minutes at 13 € an hour?", "How much do I earn in 50 minutes at 13 € an hour?"),
-    ("Write a haiku about compilers", "Write a haiku about compilers."),
-    ("Weekend project ideas", "Give me 5 ideas for a weekend side project."),
+    ("What's on my calendar?", "What's on my calendar this week?"),
+    ("Today's headlines", "Summarize today's top headlines from my news feeds."),
+    ("Search my notes", "What have I written in my notes recently?"),
 ];
 
 // ======================================================================

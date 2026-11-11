@@ -134,7 +134,6 @@ fn Sidebar() -> impl IntoView {
                 .collect_view()}
             <div class="sidebar-foot">
                 <Clock />
-                <div>"Running locally with Ollama"</div>
                 <div class="app-version">{concat!("Terrarium v", env!("CARGO_PKG_VERSION"))}</div>
             </div>
         </nav>
