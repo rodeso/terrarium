@@ -244,7 +244,7 @@ pub fn NewsPage() -> impl IntoView {
     let total_unread = move || ctx.feeds.with(|f| f.iter().map(|x| x.unread).sum::<i64>());
 
     view! {
-        <Title text="Newsstand · Workspace" />
+        <Title text="Newsstand · Terrarium" />
         <section class="pane news-pane">
             <div class="toolbar news-toolbar">
                 <button class="aero-btn" disabled=move || refreshing.get() on:click=move |_| refresh()>

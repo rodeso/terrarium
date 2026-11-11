@@ -6,7 +6,7 @@ use ammonia::Url;
 use futures::StreamExt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const USER_AGENT: &str = "Workspace/0.1 (personal feed reader)";
+const USER_AGENT: &str = concat!("Terrarium/", env!("CARGO_PKG_VERSION"), " (personal feed reader)");
 const TIMEOUT: Duration = Duration::from_secs(20);
 /// Feeds bigger than this are refused.
 const MAX_BYTES: usize = 5 * 1024 * 1024;

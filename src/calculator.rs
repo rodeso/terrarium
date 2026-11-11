@@ -249,7 +249,7 @@ pub fn CalculatorPage() -> impl IntoView {
     };
 
     view! {
-        <Title text="Calculator · Workspace" />
+        <Title text="Calculator · Terrarium" />
         <section class="pane calc-pane">
             <div class="toolbar">
                 <span class="toolbar-title">"Calculator"</span>

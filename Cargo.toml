@@ -1,5 +1,5 @@
 [package]
-name = "ollama-web-app"
+name = "terrarium"
 version = "0.1.0"
 edition = "2024"
 
@@ -37,6 +37,7 @@ web-sys = { version = "0.3", features = [
     "KeyboardEvent",
     "MouseEvent",
     "Navigator",
+    "Storage",
     "Window",
 ] }
 console_error_panic_hook = { version = "0.1", optional = true }
@@ -81,7 +82,7 @@ codegen-units = 1
 panic = "abort"
 
 [package.metadata.leptos]
-output-name = "ollama-web-app"
+output-name = "terrarium"
 site-root = "target/site"
 site-pkg-dir = "pkg"
 style-file = "style/main.css"

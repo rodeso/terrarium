@@ -5,9 +5,9 @@ async fn main() -> std::io::Result<()> {
     use actix_web::{App, HttpServer, middleware::Logger, web};
     use leptos::config::get_configuration;
     use leptos_actix::{LeptosRoutes, generate_route_list};
-    use ollama_web_app::app::{Workspace, shell};
-    use ollama_web_app::chat::MAX_UPLOAD_BYTES;
-    use ollama_web_app::server::AppState;
+    use terrarium::app::{App, shell};
+    use terrarium::chat::MAX_UPLOAD_BYTES;
+    use terrarium::server::AppState;
 
     let conf = get_configuration(None).expect("failed to read Leptos configuration");
     let addr = conf.leptos_options.site_addr;
@@ -16,7 +16,7 @@ async fn main() -> std::io::Result<()> {
     println!("Listening on http://{addr}");
 
     HttpServer::new(move || {
-        let routes = generate_route_list(Workspace);
+        let routes = generate_route_list(App);
         let leptos_options = conf.leptos_options.clone();
         let site_root = leptos_options.site_root.to_string();
 

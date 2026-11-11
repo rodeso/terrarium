@@ -1,4 +1,4 @@
-//! The Notes module: markdown notes saved in the workspace database, with
+//! The Notes module: markdown notes saved in the app database, with
 //! search, pinning, autosave and a live preview.
 
 use crate::calculator::format_time;
@@ -226,7 +226,7 @@ pub fn NotesPage() -> impl IntoView {
     };
 
     view! {
-        <Title text="Notes · Workspace" />
+        <Title text="Notes · Terrarium" />
         <section class="pane notes-pane">
             <div class="toolbar">
                 <button class="aero-btn" disabled=move || creating.get() on:click=new_note.clone()>

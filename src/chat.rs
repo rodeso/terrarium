@@ -360,7 +360,7 @@ pub fn ChatPage() -> impl IntoView {
     let info = Resource::new(|| (), |_| get_chat());
 
     view! {
-        <Title text="Chat · Workspace" />
+        <Title text="Chat · Terrarium" />
         <section class="pane">
             <div class="toolbar">
                 <button class="aero-btn" disabled=move || chat.pending.get() on:click=move |_| chat.new_chat()>

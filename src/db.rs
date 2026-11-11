@@ -1,7 +1,7 @@
-//! Server-only: the SQLite database where the workspace keeps data that must
+//! Server-only: the SQLite database where the app keeps data that must
 //! survive restarts (notes, for now).
 //!
-//! The file lives at `data/workspace.db` (override with WORKSPACE_DB) and is
+//! The file lives at `data/terrarium.db` (override with TERRARIUM_DB) and is
 //! created, with its tables, on first run.
 
 use crate::calendar::{Event, EventInput};
@@ -12,7 +12,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const DEFAULT_PATH: &str = "data/workspace.db";
+const DEFAULT_PATH: &str = "data/terrarium.db";
 
 /// Each step upgrades the schema by one version; never edit a step once
 /// released, only append new ones.
@@ -72,7 +72,7 @@ pub struct Db(Arc<Mutex<Connection>>);
 
 impl Db {
     pub fn open_from_env() -> Result<Self, String> {
-        let path = std::env::var("WORKSPACE_DB").ok().filter(|p| !p.trim().is_empty()).unwrap_or(DEFAULT_PATH.into());
+        let path = std::env::var("TERRARIUM_DB").ok().filter(|p| !p.trim().is_empty()).unwrap_or(DEFAULT_PATH.into());
         if let Some(dir) = Path::new(&path).parent().filter(|d| !d.as_os_str().is_empty()) {
             std::fs::create_dir_all(dir).map_err(|e| format!("Can't create {}: {e}", dir.display()))?;
         }

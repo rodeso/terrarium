@@ -22,6 +22,23 @@ const MODULES: [(&str, &str, &str); 5] = [
     ("Calculator", "/calculator", "icon-calc"),
 ];
 
+/// Themes in the title bar picker: (id, name, description). The id is the
+/// `data-theme` value on `<html>` that style/main.css keys on; "aero" is the
+/// default and has no overrides.
+const THEMES: [(&str, &str, &str); 5] = [
+    ("aero", "Frutiger Aero", "Sky, grass and glossy glass"),
+    ("eco", "Frutiger Eco", "Leaves, dew drops and daylight"),
+    ("dark-aero", "Dark Aero", "Black glass and aurora glow"),
+    ("technozen", "Technozen", "Silver calm and still water"),
+    ("dorfic", "DORFic", "White steel with orange accents"),
+];
+const THEME_KEY: &str = "theme";
+
+/// Runs before the first paint so a saved theme never flashes the default.
+/// `<html>` is outside the hydrated body, so setting it here is safe.
+const THEME_BOOT: &str =
+    "try{var t=localStorage.getItem('theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}";
+
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
         <!DOCTYPE html>
@@ -30,12 +47,13 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <meta charset="utf-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
                 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+                <script inner_html=THEME_BOOT></script>
                 <AutoReload options=options.clone() />
                 <HydrationScripts options />
                 <MetaTags />
             </head>
             <body>
-                <Workspace />
+                <App />
             </body>
         </html>
     }
@@ -43,14 +61,14 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 
 /// Sky backdrop, glass window, sidebar, and the active module.
 #[component]
-pub fn Workspace() -> impl IntoView {
+pub fn App() -> impl IntoView {
     provide_meta_context();
     // App-level so a streaming reply survives switching tabs.
     provide_context(Chat::new());
 
     view! {
-        <Stylesheet id="leptos" href="/pkg/ollama-web-app.css" />
-        <Title text="Workspace" />
+        <Stylesheet id="leptos" href="/pkg/terrarium.css" />
+        <Title text="Terrarium" />
 
         <div class="backdrop" aria-hidden="true">
             {(0..9).map(|i| view! { <span class=format!("orb orb-{i}")></span> }).collect_view()}
@@ -60,7 +78,8 @@ pub fn Workspace() -> impl IntoView {
             <div class="window">
                 <div class="titlebar">
                     <span class="app-icon" aria-hidden="true"></span>
-                    <span class="title">"Workspace"</span>
+                    <span class="title">"Terrarium"</span>
+                    <ThemePicker />
                 </div>
                 <div class="window-body">
                     <Sidebar />
@@ -116,8 +135,92 @@ fn Sidebar() -> impl IntoView {
             <div class="sidebar-foot">
                 <Clock />
                 <div>"Running locally with Ollama"</div>
+                <div class="app-version">{concat!("Terrarium v", env!("CARGO_PKG_VERSION"))}</div>
             </div>
         </nav>
+    }
+}
+
+/// Title bar menu for switching themes. The choice is saved in this
+/// browser's localStorage and applied to `<html data-theme>` at once.
+#[component]
+fn ThemePicker() -> impl IntoView {
+    let current = RwSignal::new(THEMES[0].0.to_string());
+    let open = RwSignal::new(false);
+    // Read what the boot script applied (browser only).
+    Effect::new(move |_| {
+        if let Some(t) = document().document_element().and_then(|e| e.get_attribute("data-theme")) {
+            if THEMES.iter().any(|&(id, ..)| id == t) {
+                current.set(t);
+            }
+        }
+    });
+    let choose = move |id: &'static str| {
+        current.set(id.to_string());
+        open.set(false);
+        if let Some(root) = document().document_element() {
+            let _ = root.set_attribute("data-theme", id);
+        }
+        if let Ok(Some(storage)) = window().local_storage() {
+            let _ = storage.set_item(THEME_KEY, id);
+        }
+    };
+    let name = move || {
+        current.with(|c| THEMES.iter().find(|&&(id, ..)| id == c).map_or(THEMES[0].1, |&(_, n, _)| n))
+    };
+
+    view! {
+        <div
+            class="theme-picker"
+            on:keydown=move |ev| {
+                if ev.key() == "Escape" {
+                    open.set(false);
+                }
+            }
+        >
+            <button
+                class="theme-btn"
+                aria-haspopup="menu"
+                aria-expanded=move || open.get().to_string()
+                title=move || format!("Theme: {}", name())
+                on:click=move |_| open.update(|o| *o = !*o)
+            >
+                <span class="theme-swatch" aria-hidden="true"></span>
+                "Theme"
+            </button>
+            <Show when=move || open.get()>
+                <div class="menu-scrim" on:click=move |_| open.set(false)></div>
+                <div class="theme-menu" role="menu" aria-label="Theme">
+                    <div class="theme-menu-head">"Choose a theme"</div>
+                    {THEMES
+                        .iter()
+                        .map(|&(id, label, blurb)| {
+                            let active = move || current.with(|c| c == id);
+                            view! {
+                                <button
+                                    class="theme-option"
+                                    class:active=active
+                                    role="menuitemradio"
+                                    aria-checked=move || active().to_string()
+                                    on:click=move |_| choose(id)
+                                >
+                                    <span class=format!("theme-preview preview-{id}") aria-hidden="true">
+                                        <i></i>
+                                        <i></i>
+                                        <i></i>
+                                    </span>
+                                    <span>
+                                        <b>{label}</b>
+                                        <small>{blurb}</small>
+                                    </span>
+                                    <span class="tick" aria-hidden="true">{move || active().then_some("✓")}</span>
+                                </button>
+                            }
+                        })
+                        .collect_view()}
+                </div>
+            </Show>
+        </div>
     }
 }
 

@@ -2096,34 +2096,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ollama-web-app"
-version = "0.1.0"
-dependencies = [
- "actix-files",
- "actix-web",
- "ammonia",
- "chrono",
- "console_error_panic_hook",
- "feed-rs",
- "futures",
- "js-sys",
- "leptos",
- "leptos_actix",
- "leptos_meta",
- "leptos_router",
- "pulldown-cmark",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "tokio",
- "unicode-segmentation",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3251,6 +3223,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5fed54709c5b3a53d09bb1c113ea4f5ceafd1e772ddcb0030a82e1d56c087b08"
 dependencies = [
  "new_debug_unreachable",
+]
+
+[[package]]
+name = "terrarium"
+version = "0.1.0"
+dependencies = [
+ "actix-files",
+ "actix-web",
+ "ammonia",
+ "chrono",
+ "console_error_panic_hook",
+ "feed-rs",
+ "futures",
+ "js-sys",
+ "leptos",
+ "leptos_actix",
+ "leptos_meta",
+ "leptos_router",
+ "pulldown-cmark",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "unicode-segmentation",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

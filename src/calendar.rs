@@ -1,4 +1,4 @@
-//! The Calendar module: a month view with events stored in the workspace
+//! The Calendar module: a month view with events stored in the app
 //! database. Dates and times are plain local values ("2026-11-14", "15:30").
 
 use crate::chat::error_text;
@@ -192,7 +192,7 @@ pub fn CalendarPage() -> impl IntoView {
     };
 
     view! {
-        <Title text="Calendar · Workspace" />
+        <Title text="Calendar · Terrarium" />
         <section class="pane calendar-pane">
             <div class="toolbar">
                 <a class="aero-btn small" href=move || format!("/calendar/{}", selected.get().add_months(-1)) title="Previous month" aria-label="Previous month">"‹"</a>
