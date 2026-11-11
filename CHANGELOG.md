@@ -10,6 +10,8 @@ that section into a version when you release.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-11
+
 ### Added
 
 - Chat with a local Ollama model, with streaming replies, Markdown and code
