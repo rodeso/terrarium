@@ -1,3 +1,6 @@
+// Leptos views nest deeply; optimized builds exceed the default limit of 128.
+#![recursion_limit = "256"]
+
 #[cfg(feature = "ssr")]
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {

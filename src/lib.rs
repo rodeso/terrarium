@@ -1,3 +1,6 @@
+// Leptos views nest deeply; optimized builds exceed the default limit of 128.
+#![recursion_limit = "256"]
+
 pub mod app;
 pub mod calc;
 pub mod calendar;
