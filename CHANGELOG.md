@@ -10,6 +10,8 @@ that section into a version when you release.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+
 ### Added
 
 - Search tab: web search through your own SearXNG, with results, quick
