@@ -57,6 +57,7 @@ pub enum ToolKind {
     ReadArticle,
     CalendarEvents,
     AddEvent,
+    WebSearch,
     /// A tool name the model made up.
     Unknown,
 }
@@ -565,6 +566,13 @@ fn ToolChip(tool: ToolUse) -> impl IntoView {
         ToolKind::ReadArticle => ("Read article", "tool-icon-news", "", "/news", "The model read this article. Click to open it."),
         ToolKind::CalendarEvents => ("Calendar", "tool-icon-calendar", "→", "/calendar", "The model looked at your calendar."),
         ToolKind::AddEvent => ("Added event", "tool-icon-calendar", "", "/calendar", "The model added this to your calendar. Click to open that day."),
+        ToolKind::WebSearch => (
+            "Web search",
+            "tool-icon-search",
+            "→",
+            "/search",
+            if ok { "The model searched the web. Click to see the results." } else { "The model tried to search the web, but search isn't available." },
+        ),
         ToolKind::Unknown => ("Unknown tool", "tool-icon", "→", "/", "The model tried to use a tool that doesn't exist."),
     };
     let href = tool.link.clone().unwrap_or_else(|| default_link.to_string());

@@ -1,0 +1,46 @@
+# Terrarium and its web search. Start with: docker compose up -d --build
+# Ollama runs on the host, not here: Docker on a Mac can't use the GPU.
+services:
+  terrarium:
+    build: .
+    image: terrarium:local
+    ports:
+      # Localhost only: Terrarium has no accounts. TERRARIUM_PORT changes the
+      # port, e.g. to run it beside `cargo leptos watch`, which uses 8080.
+      - "127.0.0.1:${TERRARIUM_PORT:-8080}:8080"
+    environment:
+      # The host's Ollama. On Linux, Ollama must listen on more than
+      # 127.0.0.1 for this to work (OLLAMA_HOST=0.0.0.0).
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      # Passed through when set in the shell or a .env file; empty means the
+      # app's default.
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-}
+      OLLAMA_TEMPERATURE: ${OLLAMA_TEMPERATURE:-}
+      OLLAMA_NUM_CTX: ${OLLAMA_NUM_CTX:-}
+      OLLAMA_NUM_PREDICT: ${OLLAMA_NUM_PREDICT:-}
+      OLLAMA_SYSTEM_PROMPT: ${OLLAMA_SYSTEM_PROMPT:-}
+      SEARXNG_URL: http://searxng:8080
+    extra_hosts:
+      # Docker Desktop provides this name already; Linux needs it mapped.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - terrarium-data:/data
+    depends_on:
+      - searxng
+    restart: unless-stopped
+
+  # Web search for the Search tab and the model's web_search tool.
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    ports:
+      # Published for `cargo leptos watch`; the container above uses the
+      # internal address. Localhost only.
+      - "127.0.0.1:8888:8080"
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    restart: unless-stopped
+
+volumes:
+  # Notes, calendar, feeds and articles for the Docker version. Separate from
+  # data/terrarium.db, which `cargo leptos watch` uses.
+  terrarium-data:

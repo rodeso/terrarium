@@ -11,6 +11,7 @@ pub mod emoji;
 pub mod markdown;
 pub mod news;
 pub mod notes;
+pub mod search;
 
 #[cfg(feature = "ssr")]
 pub mod db;
@@ -18,6 +19,8 @@ pub mod db;
 pub mod feeds;
 #[cfg(feature = "ssr")]
 pub mod server;
+#[cfg(feature = "ssr")]
+pub mod websearch;
 
 /// Browser entry point: attaches interactivity to the server-rendered page.
 #[cfg(feature = "hydrate")]

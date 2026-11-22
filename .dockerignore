@@ -1,0 +1,6 @@
+# Keep the build context small: the build cache alone is many gigabytes.
+target/
+data/
+.git/
+.claude/
+.DS_Store

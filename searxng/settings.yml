@@ -1,0 +1,22 @@
+# SearXNG settings for Terrarium's web search. Starts from SearXNG's
+# defaults and changes only what the app needs. Used by compose.yaml.
+use_default_settings: true
+
+general:
+  instance_name: "Terrarium Search"
+
+server:
+  # Only reachable from this computer (see compose.yaml), so a fixed key is
+  # fine. SearXNG refuses to start with its placeholder key.
+  secret_key: "terrarium-local-only"
+  # The rate limiter is meant for public instances and needs Valkey.
+  limiter: false
+  public_instance: false
+  image_proxy: false
+
+search:
+  safe_search: 0
+  # Terrarium reads results through the JSON API, which is off by default.
+  formats:
+    - html
+    - json

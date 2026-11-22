@@ -10,6 +10,18 @@ that section into a version when you release.
 
 ## [Unreleased]
 
+### Added
+
+- Search tab: web search through your own SearXNG, with results, quick
+  answers and related searches.
+- `web_search` assistant tool. The reply shows a chip that opens the same
+  results in the Search tab.
+- `compose.yaml` and `searxng/settings.yml` to run SearXNG locally on port
+  8888, and the `SEARXNG_URL` setting.
+- Docker image for Terrarium (`Dockerfile`). `docker compose up -d --build`
+  runs it with SearXNG, using Ollama on the host. Data lives in the
+  `terrarium-data` volume, and `TERRARIUM_PORT` picks the published port.
+
 ## [0.1.0] - 2026-11-11
 
 ### Added
